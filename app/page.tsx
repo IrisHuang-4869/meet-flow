@@ -14,7 +14,17 @@ import {
 } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { Plus, Users, Calendar, User, CalendarCheck } from "lucide-react";
+import {
+  Plus,
+  Users,
+  Calendar,
+  User,
+  CalendarCheck,
+  Link as LinkIcon,
+  ClipboardCopy,
+  Check,
+  Trophy,
+} from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,7 +34,8 @@ type Member = {
   id: string;
   name: string;
   color: string;
-  availability: TimeSlot[];
+  ratings: Record<TimeSlot, number>; // 0-5
+  submitted: boolean;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -42,43 +53,45 @@ const COLORS = [
 ];
 
 const slot = (day: number, hour: number): TimeSlot => `${day}-${hour}`;
+const toLabel = (s: TimeSlot) => {
+  const [d, h] = s.split("-").map(Number);
+  return `${DAYS[d]} ${h}:00-${h + 1}:00`;
+};
 
 // ─── Fake initial data ────────────────────────────────────────────────────────
 
-// 假資料：三人皆有「週三 9–11」共同空閒，方便展示
+// 假資料：先預設候選時段與分數，方便展示
 const INITIAL_MEMBERS: Member[] = [
   {
     id: "me",
     name: "我",
     color: "bg-blue-500",
-    availability: [
-      slot(0, 9), slot(0, 10), slot(0, 11),          // Mon 9–12
-      slot(0, 14), slot(0, 15), slot(0, 16),         // Mon 14–17
-      slot(2, 9),  slot(2, 10), slot(2, 11),         // Wed 9–12（共同）
-      slot(3, 14), slot(3, 15), slot(3, 16),         // Thu 14–17
-      slot(4, 9),  slot(4, 10),                      // Fri 9–11
-    ],
+    ratings: {},
+    submitted: false,
   },
   {
     id: "xiao-liang",
     name: "小梁",
     color: "bg-green-500",
-    availability: [
-      slot(0, 9),  slot(0, 10), slot(0, 11),         // Mon 9–12
-      slot(2, 9),  slot(2, 10), slot(2, 11),         // Wed 9–12（共同）
-      slot(2, 14), slot(2, 15), slot(2, 16),         // Wed 14–17
-      slot(4, 9),  slot(4, 10),                      // Fri 9–11
-    ],
+    ratings: {
+      [slot(0, 10)]: 4,
+      [slot(0, 11)]: 5,
+      [slot(2, 10)]: 3,
+      [slot(3, 14)]: 4,
+    },
+    submitted: true,
   },
   {
     id: "lu-lu",
     name: "盧盧",
     color: "bg-purple-500",
-    availability: [
-      slot(1, 10), slot(1, 11), slot(1, 12),         // Tue 10–13
-      slot(2, 9),  slot(2, 10), slot(2, 11),         // Wed 9–12（共同）
-      slot(3, 14), slot(3, 15),                      // Thu 14–16
-    ],
+    ratings: {
+      [slot(0, 10)]: 2,
+      [slot(0, 11)]: 4,
+      [slot(2, 10)]: 5,
+      [slot(3, 14)]: 3,
+    },
+    submitted: true,
   },
 ];
 
@@ -93,11 +106,11 @@ type DragState = {
 };
 
 function ScheduleGrid({
-  availability,
+  activeSlots,
   onBatchToggle,
   emerald = false,
 }: {
-  availability: TimeSlot[];
+  activeSlots: TimeSlot[];
   onBatchToggle?: (slots: TimeSlot[], fill: boolean) => void;
   emerald?: boolean;
 }) {
@@ -154,7 +167,7 @@ function ScheduleGrid({
               </td>
               {DAYS.map((_, d) => {
                 const s = slot(d, h);
-                const active = availability.includes(s);
+                const active = activeSlots.includes(s);
                 const inRect = inDragRect(d, hi);
 
                 let cellClass: string;
@@ -205,6 +218,78 @@ function ScheduleGrid({
   );
 }
 
+function ScoreHeatmapGrid({
+  candidateSlots,
+  totals,
+  bestSlot,
+}: {
+  candidateSlots: TimeSlot[];
+  totals: Record<TimeSlot, number>;
+  bestSlot?: TimeSlot;
+}) {
+  const maxScore = Math.max(1, ...Object.values(totals), 1);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr>
+            <th className="w-14" />
+            {DAYS.map((d) => (
+              <th key={d} className="p-2 text-center font-medium text-sm">
+                {d}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {HOURS.map((h) => (
+            <tr key={h}>
+              <td className="text-right pr-3 text-muted-foreground text-xs py-0.5 whitespace-nowrap">
+                {h}:00
+              </td>
+              {DAYS.map((_, d) => {
+                const s = slot(d, h);
+                const isCandidate = candidateSlots.includes(s);
+                const score = totals[s] ?? 0;
+                const intensity = isCandidate ? score / maxScore : 0;
+                const isBest = bestSlot === s && score > 0;
+                return (
+                  <td key={d} className="p-0.5">
+                    <div
+                      className="h-8 rounded border flex items-center justify-center text-[11px] font-medium"
+                      style={{
+                        backgroundColor: isCandidate
+                          ? `rgba(16, 185, 129, ${0.08 + intensity * 0.82})`
+                          : "hsl(var(--muted))",
+                        borderColor: isBest
+                          ? "rgb(234 179 8)"
+                          : "hsl(var(--border))",
+                        color: isCandidate
+                          ? intensity > 0.58
+                            ? "white"
+                            : "hsl(var(--foreground))"
+                          : "hsl(var(--muted-foreground))",
+                        borderWidth: isBest ? "2px" : "1px",
+                      }}
+                      title={
+                        isCandidate
+                          ? `${toLabel(s)}：總分 ${score}`
+                          : "非候選時段"
+                      }
+                    >
+                      {isCandidate ? score : "-"}
+                    </div>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ─── Legend ───────────────────────────────────────────────────────────────────
 
 function Legend({ items }: { items: { color: string; label: string }[] }) {
@@ -227,30 +312,88 @@ export default function MeetFlow() {
   const [newName, setNewName] = useState("");
   const [open, setOpen] = useState(false);
   const [viewId, setViewId] = useState("xiao-liang");
+  const [candidateSlots, setCandidateSlots] = useState<TimeSlot[]>([
+    slot(0, 10),
+    slot(0, 11),
+    slot(2, 10),
+    slot(3, 14),
+  ]);
+  const [meetingId] = useState(`mf-${Date.now().toString(36)}`);
+  const [copied, setCopied] = useState(false);
 
   const me = members.find((m) => m.id === "me")!;
   const others = members.filter((m) => m.id !== "me");
   const viewing = members.find((m) => m.id === viewId) ?? others[0];
 
-  const commonSlots = DAYS.flatMap((_, d) =>
-    HOURS.filter((h) =>
-      members.every((m) => m.availability.includes(slot(d, h)))
-    ).map((h) => slot(d, h))
+  const inviteLink =
+    typeof window === "undefined"
+      ? `https://meet-flow.app/invite/${meetingId}`
+      : `${window.location.origin}?invite=${meetingId}`;
+
+  useEffect(() => {
+    setMembers((prev) =>
+      prev.map((m) => ({
+        ...m,
+        ratings: Object.fromEntries(
+          candidateSlots.map((s) => [s, m.ratings[s] ?? 0])
+        ) as Record<TimeSlot, number>,
+      }))
+    );
+  }, [candidateSlots]);
+
+  const allSubmitted = members.every((m) => m.submitted);
+
+  const slotTotals = candidateSlots.reduce<Record<TimeSlot, number>>(
+    (acc, s) => {
+      acc[s] = members.reduce((sum, m) => sum + (m.ratings[s] ?? 0), 0);
+      return acc;
+    },
+    {}
   );
 
-  function batchToggleMySlots(slots: TimeSlot[], fill: boolean) {
+  const bestSlot = Object.entries(slotTotals).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const bestScore = bestSlot ? slotTotals[bestSlot] : 0;
+
+  function batchToggleCandidateSlots(slots: TimeSlot[], fill: boolean) {
+    setCandidateSlots((prev) => {
+      const next = fill
+        ? [...new Set([...prev, ...slots])]
+        : prev.filter((x) => !slots.includes(x));
+      return next.sort();
+    });
+  }
+
+  function setMyRating(targetSlot: TimeSlot, score: number) {
     setMembers((prev) =>
       prev.map((m) =>
         m.id !== "me"
           ? m
           : {
               ...m,
-              availability: fill
-                ? [...new Set([...m.availability, ...slots])]
-                : m.availability.filter((x) => !slots.includes(x)),
+              submitted: false,
+              ratings: {
+                ...m.ratings,
+                [targetSlot]: score,
+              },
             }
       )
     );
+  }
+
+  function submitMyRatings() {
+    setMembers((prev) =>
+      prev.map((m) => (m.id === "me" ? { ...m, submitted: true } : m))
+    );
+  }
+
+  async function copyInviteLink() {
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
   }
 
   function addMember() {
@@ -261,7 +404,10 @@ export default function MeetFlow() {
       id: `member-${Date.now()}`,
       name,
       color,
-      availability: [],
+      ratings: Object.fromEntries(
+        candidateSlots.map((s) => [s, 0])
+      ) as Record<TimeSlot, number>,
+      submitted: false,
     };
     setMembers((prev) => [...prev, newMember]);
     setNewName("");
@@ -285,6 +431,10 @@ export default function MeetFlow() {
       <main className="max-w-4xl mx-auto px-6 py-8">
         <Tabs defaultValue="members">
           <TabsList className="mb-8 h-10">
+            <TabsTrigger value="invite" className="gap-1.5 text-sm">
+              <LinkIcon className="w-3.5 h-3.5" />
+              邀請
+            </TabsTrigger>
             <TabsTrigger value="members" className="gap-1.5 text-sm">
               <Users className="w-3.5 h-3.5" />
               成員
@@ -302,6 +452,44 @@ export default function MeetFlow() {
               共同空閒
             </TabsTrigger>
           </TabsList>
+
+          {/* ── Tab 0: Invite ── */}
+          <TabsContent value="invite">
+            <div className="mb-5">
+              <h2 className="text-base font-semibold">會議邀請連結</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                分享連結給成員，成員可在候選時段對每格評分（0-5）
+              </p>
+            </div>
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <div className="flex gap-2">
+                  <Input value={inviteLink} readOnly />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-1.5 shrink-0"
+                    onClick={copyInviteLink}
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        已複製
+                      </>
+                    ) : (
+                      <>
+                        <ClipboardCopy className="w-4 h-4" />
+                        複製
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Meeting ID: {meetingId}
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* ── Tab 1: Members ── */}
           <TabsContent value="members">
@@ -353,9 +541,12 @@ export default function MeetFlow() {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm truncate">{m.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {m.availability.length} 個空閒時段
+                        已評分 {Object.keys(m.ratings).length} 個時段
                       </p>
                     </div>
+                    <Badge variant={m.submitted ? "default" : "secondary"}>
+                      {m.submitted ? "已送出" : "填寫中"}
+                    </Badge>
                     {m.id === "me" && (
                       <Badge variant="outline" className="text-xs shrink-0">
                         你
@@ -370,23 +561,61 @@ export default function MeetFlow() {
           {/* ── Tab 2: My Schedule ── */}
           <TabsContent value="my-schedule">
             <div className="mb-5">
-              <h2 className="text-base font-semibold">我的時間表</h2>
+              <h2 className="text-base font-semibold">設定候選時段 + 我的評分</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                點擊或拖曳選取矩形範圍來批次切換空閒時段
+                先用拖曳選擇候選時段，再對每個時段評分 0-5
               </p>
             </div>
             <Card>
               <CardContent className="pt-6">
                 <Legend
                   items={[
-                    { color: "bg-primary", label: "空閒" },
-                    { color: "bg-muted border border-border", label: "忙碌" },
+                    { color: "bg-primary", label: "候選時段" },
+                    { color: "bg-muted border border-border", label: "非候選" },
                   ]}
                 />
                 <ScheduleGrid
-                  availability={me.availability}
-                  onBatchToggle={batchToggleMySlots}
+                  activeSlots={candidateSlots}
+                  onBatchToggle={batchToggleCandidateSlots}
                 />
+                <div className="mt-5 space-y-3">
+                  <h3 className="text-sm font-semibold">我的評分（0-5）</h3>
+                  {me.submitted && (
+                    <div className="text-sm px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200">
+                      已送出你的評分，若重新修改分數會自動回到「填寫中」狀態。
+                    </div>
+                  )}
+                  {candidateSlots.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      尚未設定候選時段
+                    </p>
+                  ) : (
+                    candidateSlots.map((s) => (
+                      <div
+                        key={s}
+                        className="flex flex-wrap items-center gap-2 border rounded-lg p-3"
+                      >
+                        <span className="text-sm min-w-40">{toLabel(s)}</span>
+                        {Array.from({ length: 6 }, (_, i) => (
+                          <Button
+                            key={`${s}-${i}`}
+                            size="sm"
+                            variant={me.ratings[s] === i ? "default" : "outline"}
+                            onClick={() => setMyRating(s, i)}
+                          >
+                            {i}
+                          </Button>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                  <Button
+                    onClick={submitMyRatings}
+                    disabled={candidateSlots.length === 0 || me.submitted}
+                  >
+                    {me.submitted ? "已送出評分" : "送出我的評分"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -396,7 +625,7 @@ export default function MeetFlow() {
             <div className="mb-5">
               <h2 className="text-base font-semibold">查看成員時間表</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                選擇成員來查看他們的空閒時段
+                選擇成員查看每個候選時段評分
               </p>
             </div>
 
@@ -434,16 +663,31 @@ export default function MeetFlow() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Legend
-                        items={[
-                          { color: "bg-primary", label: "空閒" },
-                          {
-                            color: "bg-muted border border-border",
-                            label: "忙碌",
-                          },
-                        ]}
-                      />
-                      <ScheduleGrid availability={viewing.availability} />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {candidateSlots.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            尚未設定候選時段
+                          </p>
+                        ) : (
+                          candidateSlots.map((s) => (
+                            <div
+                              key={s}
+                              className="text-sm px-3 py-2 rounded-lg bg-muted border border-border flex items-center justify-between"
+                            >
+                              <span>{toLabel(s)}</span>
+                              <Badge
+                                variant={
+                                  (viewing.ratings[s] ?? 0) >= 4
+                                    ? "default"
+                                    : "secondary"
+                                }
+                              >
+                                {viewing.ratings[s] ?? 0} 分
+                              </Badge>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -454,9 +698,9 @@ export default function MeetFlow() {
           {/* ── Tab 4: Common Availability ── */}
           <TabsContent value="common">
             <div className="mb-5">
-              <h2 className="text-base font-semibold">共同空閒時間</h2>
+              <h2 className="text-base font-semibold">最佳開會時段（分數總和）</h2>
               <p className="text-sm text-muted-foreground mt-0.5">
-                所有 {members.length} 位成員都空閒的時段
+                需全員送出後才會產生結果，顏色越深代表分數越高
               </p>
             </div>
 
@@ -464,34 +708,37 @@ export default function MeetFlow() {
               <CardContent className="pt-6">
                 <Legend
                   items={[
-                    { color: "bg-emerald-400", label: "共同空閒" },
-                    { color: "bg-muted border border-border", label: "非共同" },
+                    { color: "bg-emerald-500", label: "高分時段（深色）" },
+                    { color: "bg-emerald-200", label: "低分時段（淺色）" },
                   ]}
                 />
-                {commonSlots.length === 0 ? (
+                {!allSubmitted ? (
                   <p className="text-center text-muted-foreground py-10 text-sm">
-                    目前沒有共同空閒時段
+                    尚未全部成員送出評分（{members.filter((m) => m.submitted).length}/
+                    {members.length}）
                   </p>
                 ) : (
-                  <ScheduleGrid availability={commonSlots} emerald />
+                  <ScoreHeatmapGrid
+                    candidateSlots={candidateSlots}
+                    totals={slotTotals}
+                    bestSlot={bestSlot}
+                  />
                 )}
               </CardContent>
             </Card>
 
-            {commonSlots.length > 0 && (
-              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {commonSlots.map((s) => {
-                  const [d, h] = s.split("-").map(Number);
-                  return (
-                    <div
-                      key={s}
-                      className="text-sm px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-200"
-                    >
-                      {DAYS[d]} {h}:00–{h + 1}:00
-                    </div>
-                  );
-                })}
-              </div>
+            {allSubmitted && bestSlot && (
+              <Card className="mt-4 border-yellow-300/60">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                    <Trophy className="w-4 h-4" />
+                    <span className="text-sm font-medium">推薦開會時段</span>
+                  </div>
+                  <p className="mt-2 text-base font-semibold">
+                    {toLabel(bestSlot)}（總分 {bestScore}）
+                  </p>
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
         </Tabs>
